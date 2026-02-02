@@ -10,7 +10,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 add_subdirectory(SDL EXCLUDE_FROM_ALL)
 
 # Create your game executable target as usual
-add_executable(fractal-viewer WIN32 hello.c)
+add_executable(fractal-viewer WIN32 main.c)
 
 # Link to the actual SDL3 library.
 target_link_libraries(fractal-viewer PRIVATE SDL3::SDL3)
