@@ -5,10 +5,10 @@
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
 
-#define WINDOW_WIDTH 1920
-#define WINDOW_HEIGHT 1080
+#define WINDOW_WIDTH 640
+#define WINDOW_HEIGHT 420
 
-#define SCALE 1
+#define SCALE 2
 
 double interpolate(int scaled, int from1, int from2, double to1, double to2) {
     return (double) scaled/(from2-from1)*(to2-to1)+to1;
@@ -23,8 +23,10 @@ bool isMandelbrot(double a, double b) {
     double fb = 0;
     int i;
     for (i = 0; i < 1000; i++) {
-        fa = fa*fa-fb*fb + a;
-        fb = 2*fa*fb + b;
+        double temp_fa = fa*fa - fb*fb + a;
+        double temp_fb = 2*fa*fb + b;
+        fa = temp_fa;
+        fb = temp_fb;
         if (magnitude(fa, fb) > 2) break;
     }
 
