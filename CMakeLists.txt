@@ -14,3 +14,24 @@ add_executable(fractal-viewer WIN32 main.c)
 
 # Link to the actual SDL3 library.
 target_link_libraries(fractal-viewer PRIVATE SDL3::SDL3)
+
+# Compile GLSL shaders to SPIR-V
+set(SHADER_DIR ${CMAKE_SOURCE_DIR}/shaders)
+set(SHADERS
+    ${SHADER_DIR}/vertex.glsl
+    ${SHADER_DIR}/fragment.glsl
+)
+
+# Copy shaders to the executable output directory
+add_custom_command(TARGET fractal-viewer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/shaders
+    $<TARGET_FILE_DIR:fractal-viewer>/shaders
+)
+
+add_custom_target(compile_shaders ALL
+    COMMAND glslc -fshader-stage=vertex ${SHADER_DIR}/vertex.glsl -o ${SHADER_DIR}/vertex.spv
+    COMMAND glslc -fshader-stage=fragment ${SHADER_DIR}/fragment.glsl -o ${SHADER_DIR}/fragment.spv
+    DEPENDS ${SHADERS}
+    COMMENT "Compiling GLSL shaders to SPIR-V"
+)

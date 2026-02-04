@@ -1,83 +1,295 @@
-#define SDL_MAIN_USE_CALLBACKS 1
-#include <SDL3/SDL.h>
+#define SDL_MAIN_USE_CALLBACKS
 #include <SDL3/SDL_main.h>
+#include <SDL3/SDL.h>
 
-static SDL_Window *window = NULL;
-static SDL_Renderer *renderer = NULL;
-
-#define WINDOW_WIDTH 1920
-#define WINDOW_HEIGHT 1080
-
-#define SCALE 1
-
-static int iter = 1;
-
-double interpolate(int scaled, int from1, int from2, double to1, double to2) {
-    return (double) scaled/(from2-from1)*(to2-to1)+to1;
-}
-
-double magnitude(double a, double b) {
-    return SDL_sqrt(a*a + b*b);
-}
-
-bool isMandelbrot(double a, double b) {
-    double fa = 0;
-    double fb = 0;
-    int i;
-    for (i = 0; i < 200; i++) {
-        double temp_fa = fa*fa - fb*fb + a;
-        double temp_fb = 2*fa*fb + b;
-        fa = temp_fa;
-        fb = temp_fb;
-        if (magnitude(fa, fb) > 2) break;
-    }
-
-    return (i > iter);
-}
-
-void draw() {
-    // clear canvas
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(renderer);
-
-    // draw axis
-    SDL_SetRenderDrawColor(renderer, 50, 50, 255, SDL_ALPHA_OPAQUE);
-    SDL_RenderLine(renderer, WINDOW_WIDTH/2, 0, WINDOW_WIDTH/2, WINDOW_HEIGHT);
-    SDL_RenderLine(renderer, 0, WINDOW_HEIGHT/2, WINDOW_WIDTH, WINDOW_HEIGHT/2);
-
-    // draw fractal
-    uint8_t colored;
-    double a, b;
-    for (int y = 0; y < WINDOW_HEIGHT; y++) {
-        for (int x = 0; x < WINDOW_WIDTH; x++) {
-            a = interpolate(x, 0, WINDOW_WIDTH, -2, 2);
-            b = -interpolate(y, 0, WINDOW_HEIGHT, -1.25, 1.25);
-            if (isMandelbrot(a, b)) {
-                SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-                SDL_RenderPoint(renderer, x, y);
-            }
-        }
-    }
-
-    SDL_RenderPresent(renderer);
-}
-
-SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
+// Vertex structure for full-screen quad
+struct Vertex
 {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
+    float x, y;     // position
+};
+
+// Full-screen quad vertices (4 vertices shared by 2 triangles)
+static struct Vertex vertices[] = {
+    {-1.0f,  1.0f},  // 0: top-left
+    {-1.0f, -1.0f},  // 1: bottom-left
+    { 1.0f, -1.0f},  // 2: bottom-right
+    { 1.0f,  1.0f},  // 3: top-right
+};
+
+// Index buffer: defines two triangles using the 4 vertices
+static Uint16 indices[] = {
+    0, 1, 2,  // First triangle
+    0, 2, 3   // Second triangle
+};
+
+SDL_Window* window;
+SDL_GPUDevice* device;
+SDL_GPUBuffer* vertexBuffer;
+SDL_GPUBuffer* indexBuffer;
+SDL_GPUGraphicsPipeline* graphicsPipeline;
+
+#define WINDOW_WIDTH 960
+#define WINDOW_HEIGHT 540
+
+SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
+{
+    // Create a window
+    window = SDL_CreateWindow("Fractal Viewer", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE);
+    if (!window) {
+        SDL_Log("Failed to create window: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    
+    // Create the GPU device - prefer SPIRV for cross-platform, fallback to others
+    device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, NULL);
+    if (!device) {
+        SDL_Log("Failed to create GPU device: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    
+    if (!SDL_ClaimWindowForGPUDevice(device, window)) {
+        SDL_Log("Failed to claim window: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
-    if (!SDL_CreateWindowAndRenderer("Fractal Viewer", WINDOW_WIDTH*SCALE, WINDOW_HEIGHT*SCALE, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
-        SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
+    // Determine which shader format to use
+    SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_SPIRV;
+    const char* vertexShaderPath = "shaders/vertex.spv";
+    const char* fragmentShaderPath = "shaders/fragment.spv";
+    
+    // Load the vertex shader code
+    size_t vertexCodeSize; 
+    void* vertexCode = SDL_LoadFile(vertexShaderPath, &vertexCodeSize);
+    if (!vertexCode) {
+        SDL_Log("Failed to load vertex shader: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
-    SDL_SetRenderLogicalPresentation(renderer, WINDOW_WIDTH*SCALE, WINDOW_HEIGHT*SCALE, SDL_LOGICAL_PRESENTATION_LETTERBOX);
-    SDL_SetRenderScale(renderer, SCALE, SCALE);
 
-    draw();
+    // Create the vertex shader
+    SDL_GPUShaderCreateInfo vertexInfo = {0};
+    vertexInfo.code = (Uint8*)vertexCode;
+    vertexInfo.code_size = vertexCodeSize;
+    vertexInfo.entrypoint = "main";
+    vertexInfo.format = format;
+    vertexInfo.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    vertexInfo.num_samplers = 0;
+    vertexInfo.num_storage_buffers = 0;
+    vertexInfo.num_storage_textures = 0;
+    vertexInfo.num_uniform_buffers = 0;
 
+    SDL_GPUShader* vertexShader = SDL_CreateGPUShader(device, &vertexInfo);
+    SDL_free(vertexCode);
+    
+    if (!vertexShader) {
+        SDL_Log("Failed to create vertex shader: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    // Load the fragment shader code
+    size_t fragmentCodeSize; 
+    void* fragmentCode = SDL_LoadFile(fragmentShaderPath, &fragmentCodeSize);
+    if (!fragmentCode) {
+        SDL_Log("Failed to load fragment shader: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    // Create the fragment shader
+    SDL_GPUShaderCreateInfo fragmentInfo = {0};
+    fragmentInfo.code = (Uint8*)fragmentCode;
+    fragmentInfo.code_size = fragmentCodeSize;
+    fragmentInfo.entrypoint = "main";
+    fragmentInfo.format = format;
+    fragmentInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentInfo.num_samplers = 0;
+    fragmentInfo.num_storage_buffers = 0;
+    fragmentInfo.num_storage_textures = 0;
+    fragmentInfo.num_uniform_buffers = 0;
+
+    SDL_GPUShader* fragmentShader = SDL_CreateGPUShader(device, &fragmentInfo);
+    SDL_free(fragmentCode);
+    
+    if (!fragmentShader) {
+        SDL_Log("Failed to create fragment shader: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    // Create the graphics pipeline
+    SDL_GPUGraphicsPipelineCreateInfo pipelineInfo = {0};
+    pipelineInfo.vertex_shader = vertexShader;
+    pipelineInfo.fragment_shader = fragmentShader;
+    pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    
+    // Describe the vertex buffers
+    SDL_GPUVertexBufferDescription vertexBufferDescriptions[1];
+    vertexBufferDescriptions[0].slot = 0;
+    vertexBufferDescriptions[0].input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vertexBufferDescriptions[0].instance_step_rate = 0;
+    vertexBufferDescriptions[0].pitch = sizeof(struct Vertex);
+
+    pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
+    pipelineInfo.vertex_input_state.vertex_buffer_descriptions = vertexBufferDescriptions;
+
+    // Describe the vertex attributes
+    SDL_GPUVertexAttribute vertexAttributes[1];
+
+    // position attribute
+    vertexAttributes[0].buffer_slot = 0;
+    vertexAttributes[0].location = 0;
+    vertexAttributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+    vertexAttributes[0].offset = 0;
+
+    pipelineInfo.vertex_input_state.num_vertex_attributes = 1;
+    pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
+
+    // Set the render target format
+    SDL_GPUColorTargetDescription colorTarget = {0};
+    colorTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
+    
+    pipelineInfo.target_info.num_color_targets = 1;
+    pipelineInfo.target_info.color_target_descriptions = &colorTarget;
+
+    graphicsPipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
+    if (!graphicsPipeline) {
+        SDL_Log("Failed to create graphics pipeline: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    // Release shaders (they're now part of the pipeline)
+    SDL_ReleaseGPUShader(device, vertexShader);
+    SDL_ReleaseGPUShader(device, fragmentShader);
+
+    // Create vertex buffer
+    SDL_GPUBufferCreateInfo bufferInfo = {0};
+    bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+    bufferInfo.size = sizeof(vertices);
+    
+    vertexBuffer = SDL_CreateGPUBuffer(device, &bufferInfo);
+    if (!vertexBuffer) {
+        SDL_Log("Failed to create vertex buffer: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    // Create transfer buffer to upload vertex data
+    SDL_GPUTransferBufferCreateInfo transferInfo = {0};
+    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    transferInfo.size = sizeof(vertices);
+    
+    SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(device, &transferInfo);
+    
+    // Map and copy vertex data
+    void* map = SDL_MapGPUTransferBuffer(device, transferBuffer, false);
+    SDL_memcpy(map, vertices, sizeof(vertices));
+    SDL_UnmapGPUTransferBuffer(device, transferBuffer);
+    
+    // Upload to GPU
+    SDL_GPUCommandBuffer* uploadCmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(uploadCmd);
+    
+    SDL_GPUTransferBufferLocation src = {0};
+    src.transfer_buffer = transferBuffer;
+    src.offset = 0;
+    
+    SDL_GPUBufferRegion dst = {0};
+    dst.buffer = vertexBuffer;
+    dst.offset = 0;
+    dst.size = sizeof(vertices);
+    
+    SDL_UploadToGPUBuffer(copyPass, &src, &dst, false);
+    
+    // Create index buffer
+    SDL_GPUBufferCreateInfo indexBufferInfo = {0};
+    indexBufferInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+    indexBufferInfo.size = sizeof(indices);
+    
+    indexBuffer = SDL_CreateGPUBuffer(device, &indexBufferInfo);
+    if (!indexBuffer) {
+        SDL_Log("Failed to create index buffer: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    
+    // Create transfer buffer for indices
+    SDL_GPUTransferBufferCreateInfo indexTransferInfo = {0};
+    indexTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    indexTransferInfo.size = sizeof(indices);
+    
+    SDL_GPUTransferBuffer* indexTransferBuffer = SDL_CreateGPUTransferBuffer(device, &indexTransferInfo);
+    
+    // Map and copy index data
+    void* indexMap = SDL_MapGPUTransferBuffer(device, indexTransferBuffer, false);
+    SDL_memcpy(indexMap, indices, sizeof(indices));
+    SDL_UnmapGPUTransferBuffer(device, indexTransferBuffer);
+    
+    // Upload indices to GPU
+    SDL_GPUTransferBufferLocation indexSrc = {0};
+    indexSrc.transfer_buffer = indexTransferBuffer;
+    indexSrc.offset = 0;
+    
+    SDL_GPUBufferRegion indexDst = {0};
+    indexDst.buffer = indexBuffer;
+    indexDst.offset = 0;
+    indexDst.size = sizeof(indices);
+    
+    SDL_UploadToGPUBuffer(copyPass, &indexSrc, &indexDst, false);
+    
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_SubmitGPUCommandBuffer(uploadCmd);
+    
+    SDL_ReleaseGPUTransferBuffer(device, transferBuffer);
+    SDL_ReleaseGPUTransferBuffer(device, indexTransferBuffer);
+
+    return SDL_APP_CONTINUE;
+}
+
+SDL_AppResult SDL_AppIterate(void *appstate)
+{
+    SDL_GPUCommandBuffer* cmdBuffer = SDL_AcquireGPUCommandBuffer(device);
+    if (!cmdBuffer) {
+        SDL_Log("Failed to acquire command buffer: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    
+    SDL_GPUTexture* swapchainTexture;
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmdBuffer, window, &swapchainTexture, NULL, NULL)) {
+        SDL_Log("Failed to acquire swapchain texture: %s", SDL_GetError());
+        SDL_SubmitGPUCommandBuffer(cmdBuffer);
+        return SDL_APP_CONTINUE;
+    }
+    
+    if (swapchainTexture) {
+        // Setup render target
+        SDL_GPUColorTargetInfo colorTarget = {0};
+        colorTarget.texture = swapchainTexture;
+        colorTarget.clear_color.r = 0.0f;
+        colorTarget.clear_color.g = 0.0f;
+        colorTarget.clear_color.b = 0.0f;
+        colorTarget.clear_color.a = 1.0f;
+        colorTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+        colorTarget.store_op = SDL_GPU_STOREOP_STORE;
+        
+        SDL_GPURenderPass* renderPass = SDL_BeginGPURenderPass(cmdBuffer, &colorTarget, 1, NULL);
+        
+        SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
+        
+        // Bind vertex buffer
+        SDL_GPUBufferBinding vertexBinding = {0};
+        vertexBinding.buffer = vertexBuffer;
+        vertexBinding.offset = 0;
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+        
+        // Bind index buffer
+        SDL_GPUBufferBinding indexBinding = {0};
+        indexBinding.buffer = indexBuffer;
+        indexBinding.offset = 0;
+        SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+        
+        // Draw full-screen quad (4 vertices, 6 indices = 2 triangles)
+        SDL_DrawGPUIndexedPrimitives(renderPass, 6, 1, 0, 0, 0);
+        
+        SDL_EndGPURenderPass(renderPass);
+    }
+    
+    SDL_SubmitGPUCommandBuffer(cmdBuffer);
+    
     return SDL_APP_CONTINUE;
 }
 
@@ -86,22 +298,28 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
     if (event->type == SDL_EVENT_QUIT) {
         return SDL_APP_SUCCESS;
     }
-    if (event->type == SDL_EVENT_KEY_DOWN) {
-        if (event->key.key == SDLK_UP) {
-            iter++;
-        } else if (event->key.key == SDLK_DOWN) {
-            iter = (iter > 1) ? iter-1 : iter;
-        }
-        draw();
+    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_ESCAPE) {
+        return SDL_APP_SUCCESS;
     }
-    return SDL_APP_CONTINUE;
-}
-
-SDL_AppResult SDL_AppIterate(void *appstate)
-{
     return SDL_APP_CONTINUE;
 }
 
 void SDL_AppQuit(void *appstate, SDL_AppResult result)
 {
+    if (vertexBuffer) {
+        SDL_ReleaseGPUBuffer(device, vertexBuffer);
+    }
+    if (indexBuffer) {
+        SDL_ReleaseGPUBuffer(device, indexBuffer);
+    }
+    if (graphicsPipeline) {
+        SDL_ReleaseGPUGraphicsPipeline(device, graphicsPipeline);
+    }
+    if (device) {
+        SDL_ReleaseWindowFromGPUDevice(device, window);
+        SDL_DestroyGPUDevice(device);
+    }
+    if (window) {
+        SDL_DestroyWindow(window);
+    }
 }
