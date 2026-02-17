@@ -1,6 +1,6 @@
 build/
 .vs/
-*.spv
+**.spv
 
 # Prerequisites
 *.d
