@@ -9,10 +9,10 @@ struct Vertex {
 
 // Full-screen quad vertices (4 vertices shared by 2 triangles)
 static struct Vertex vertices[] = {
-    {-1.0f,  1.0f},  // 0: top-left
-    {-1.0f, -1.0f},  // 1: bottom-left
-    { 1.0f, -1.0f},  // 2: bottom-right
-    { 1.0f,  1.0f},  // 3: top-right
+    {-1.0,  1.0},  // 0: top-left
+    {-1.0, -1.0},  // 1: bottom-left
+    { 1.0, -1.0},  // 2: bottom-right
+    { 1.0,  1.0},  // 3: top-right
 };
 
 // Index buffer: defines two triangles using the 4 vertices
@@ -20,6 +20,8 @@ static Uint16 indices[] = {
     0, 1, 2,  // First triangle
     0, 2, 3   // Second triangle
 };
+
+static double zoom = 1;
 
 SDL_Window* window;
 SDL_GPUDevice* device;
@@ -32,20 +34,26 @@ bool needsRender = true;
 #define WINDOW_WIDTH 960
 #define WINDOW_HEIGHT 540
 
-void syncStorageBuffer() {
+void syncStorageBuffer(SDL_Event *event) {
     // Upload resolution data
     SDL_GPUTransferBufferCreateInfo storageTransferInfo = {0};
     storageTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    storageTransferInfo.size = 2 * sizeof(float);
+    storageTransferInfo.size = 5 * sizeof(double);
     
     SDL_GPUTransferBuffer* storageTransferBuffer = SDL_CreateGPUTransferBuffer(device, &storageTransferInfo);
     
-    int width, height;
+    int width, height, mouseX = 0, mouseY = 0;
     SDL_GetWindowSizeInPixels(window, &width, &height);
-    float resolution[2] = {(float)width, (float)height};
+    
+    if (event) {
+        mouseX = event->wheel.mouse_x;
+        mouseY = event->wheel.mouse_y;
+    }
+
+    double buffer[5] = {(double)width, (double)height, zoom, (double)mouseX, (double)mouseY};
 
     void* storageMap = SDL_MapGPUTransferBuffer(device, storageTransferBuffer, false);
-    SDL_memcpy(storageMap, resolution, 2 * sizeof(float));
+    SDL_memcpy(storageMap, buffer, 5 * sizeof(double));
     SDL_UnmapGPUTransferBuffer(device, storageTransferBuffer);
     
     // Upload storage buffer data to GPU
@@ -59,7 +67,7 @@ void syncStorageBuffer() {
     SDL_GPUBufferRegion storageDst = {0};
     storageDst.buffer = storageBuffer;
     storageDst.offset = 0;
-    storageDst.size = 2 * sizeof(float);
+    storageDst.size = 5 * sizeof(double);
     
     SDL_UploadToGPUBuffer(storageCopyPass, &storageSrc, &storageDst, false);
     SDL_EndGPUCopyPass(storageCopyPass);
@@ -277,7 +285,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     // Create storage buffer for window resolution
     SDL_GPUBufferCreateInfo storageBufferInfo = {0};
     storageBufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-    storageBufferInfo.size = 2 * sizeof(float);  // vec2: width, height
+    storageBufferInfo.size = 5 * sizeof(double);  // vec2: width, height; vec3: zoom, mouse_x, mouse_y
     
     storageBuffer = SDL_CreateGPUBuffer(device, &storageBufferInfo);
     if (!storageBuffer) {
@@ -285,8 +293,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         return SDL_APP_FAILURE;
     }
     
-    // Upload resolution data
-    syncStorageBuffer();
+    // // Upload resolution data
+    syncStorageBuffer(NULL);
 
     return SDL_APP_CONTINUE;
 }
@@ -364,13 +372,19 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
         return SDL_APP_SUCCESS;
     }
     
-    // Re-render on any key press
-    if (event->type == SDL_EVENT_KEY_DOWN || event->type == SDL_EVENT_WINDOW_RESIZED) {
+    if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == 1) {
+
+    }
+
+    if (event->type == SDL_EVENT_MOUSE_WHEEL) {
+        zoom += -event->wheel.y * zoom * pow(2, -event->wheel.y/2-0.5); // inaccuracies when fast scrolling, lagging
+        syncStorageBuffer(event);
         needsRender = true;
     }
 
     if (event->type == SDL_EVENT_WINDOW_RESIZED) {
-        syncStorageBuffer();
+        syncStorageBuffer(NULL);
+        needsRender = true;
     }
     
     return SDL_APP_CONTINUE;
