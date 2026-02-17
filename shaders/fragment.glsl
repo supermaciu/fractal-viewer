@@ -11,14 +11,15 @@ void interpolate(in vec2 screen, out vec2 world) {
     world.y = 2.0 * screen.y / resolution.y - 1.0;
 }
 
-void mandelbrot(in vec2 c, out bool colored) {
-    float fa = 0;
-    float fb = 0;
-    float tempa;
-    float tempb;
+const int max_iter = 1000;
+void mandelbrot(in vec2 c, out vec4 color) {
+    double fb = 0;
+    double fa = 0;
+    double tempa;
+    double tempb;
 
     int i;
-    for (i = 0; i < 1000; i++) {
+    for (i = 1; i < max_iter; i++) {
         tempa = fa*fa - fb*fb + c.x;
         tempb = 2*fa*fb + c.y;
         fa = tempa;
@@ -27,16 +28,17 @@ void mandelbrot(in vec2 c, out bool colored) {
         if (distance(vec2(0, 0), vec2(fa, fb)) > 2) break;
     }
 
-    colored = (i > 800);
+    float x = 5*log(i+1)/i;
+    color = vec4(x, x, x, 1.0);
 }
 
 void main() {
     vec2 screen = gl_FragCoord.xy;
     vec2 world;
     interpolate(screen, world);
-
-    bool colored;
-    mandelbrot(world, colored);
     
-    FragColor = vec4(!colored, !colored, !colored, 1.0);
+    vec4 color;
+    mandelbrot(world, color);;
+
+    FragColor = color;
 }
