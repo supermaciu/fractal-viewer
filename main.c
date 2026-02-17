@@ -3,8 +3,7 @@
 #include <SDL3/SDL.h>
 
 // Vertex structure for full-screen quad
-struct Vertex
-{
+struct Vertex {
     float x, y;     // position
 };
 
@@ -26,15 +25,53 @@ SDL_Window* window;
 SDL_GPUDevice* device;
 SDL_GPUBuffer* vertexBuffer;
 SDL_GPUBuffer* indexBuffer;
+SDL_GPUBuffer* storageBuffer;
 SDL_GPUGraphicsPipeline* graphicsPipeline;
+bool needsRender = true;
 
 #define WINDOW_WIDTH 960
 #define WINDOW_HEIGHT 540
 
+void syncStorageBuffer() {
+    // Upload resolution data
+    SDL_GPUTransferBufferCreateInfo storageTransferInfo = {0};
+    storageTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    storageTransferInfo.size = 2 * sizeof(float);
+    
+    SDL_GPUTransferBuffer* storageTransferBuffer = SDL_CreateGPUTransferBuffer(device, &storageTransferInfo);
+    
+    int width, height;
+    SDL_GetWindowSizeInPixels(window, &width, &height);
+    float resolution[2] = {(float)width, (float)height};
+
+    void* storageMap = SDL_MapGPUTransferBuffer(device, storageTransferBuffer, false);
+    SDL_memcpy(storageMap, resolution, 2 * sizeof(float));
+    SDL_UnmapGPUTransferBuffer(device, storageTransferBuffer);
+    
+    // Upload storage buffer data to GPU
+    SDL_GPUCommandBuffer* storageUploadCmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* storageCopyPass = SDL_BeginGPUCopyPass(storageUploadCmd);
+    
+    SDL_GPUTransferBufferLocation storageSrc = {0};
+    storageSrc.transfer_buffer = storageTransferBuffer;
+    storageSrc.offset = 0;
+    
+    SDL_GPUBufferRegion storageDst = {0};
+    storageDst.buffer = storageBuffer;
+    storageDst.offset = 0;
+    storageDst.size = 2 * sizeof(float);
+    
+    SDL_UploadToGPUBuffer(storageCopyPass, &storageSrc, &storageDst, false);
+    SDL_EndGPUCopyPass(storageCopyPass);
+    SDL_SubmitGPUCommandBuffer(storageUploadCmd);
+    
+    SDL_ReleaseGPUTransferBuffer(device, storageTransferBuffer);
+}
+
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 {
     // Create a window
-    window = SDL_CreateWindow("Fractal Viewer", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE);
+    window = SDL_CreateWindow("Fractal Viewer", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window) {
         SDL_Log("Failed to create window: %s", SDL_GetError());
         return SDL_APP_FAILURE;
@@ -101,7 +138,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     fragmentInfo.format = format;
     fragmentInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
     fragmentInfo.num_samplers = 0;
-    fragmentInfo.num_storage_buffers = 0;
+    fragmentInfo.num_storage_buffers = 1;
     fragmentInfo.num_storage_textures = 0;
     fragmentInfo.num_uniform_buffers = 0;
 
@@ -237,11 +274,30 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     SDL_ReleaseGPUTransferBuffer(device, transferBuffer);
     SDL_ReleaseGPUTransferBuffer(device, indexTransferBuffer);
 
+    // Create storage buffer for window resolution
+    SDL_GPUBufferCreateInfo storageBufferInfo = {0};
+    storageBufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+    storageBufferInfo.size = 2 * sizeof(float);  // vec2: width, height
+    
+    storageBuffer = SDL_CreateGPUBuffer(device, &storageBufferInfo);
+    if (!storageBuffer) {
+        SDL_Log("Failed to create storage buffer: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    
+    // Upload resolution data
+    syncStorageBuffer();
+
     return SDL_APP_CONTINUE;
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
+    // Only render if event occured
+    if (!needsRender) {
+        return SDL_APP_CONTINUE;
+    }
+    
     SDL_GPUCommandBuffer* cmdBuffer = SDL_AcquireGPUCommandBuffer(device);
     if (!cmdBuffer) {
         SDL_Log("Failed to acquire command buffer: %s", SDL_GetError());
@@ -282,6 +338,10 @@ SDL_AppResult SDL_AppIterate(void *appstate)
         indexBinding.offset = 0;
         SDL_BindGPUIndexBuffer(renderPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
         
+        // Bind storage buffer
+        SDL_GPUBuffer* storageBuffers[] = {storageBuffer};
+        SDL_BindGPUFragmentStorageBuffers(renderPass, 0, storageBuffers, 1);
+        
         // Draw full-screen quad (4 vertices, 6 indices = 2 triangles)
         SDL_DrawGPUIndexedPrimitives(renderPass, 6, 1, 0, 0, 0);
         
@@ -289,6 +349,8 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     }
     
     SDL_SubmitGPUCommandBuffer(cmdBuffer);
+    
+    needsRender = false;
     
     return SDL_APP_CONTINUE;
 }
@@ -301,6 +363,16 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
     if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_ESCAPE) {
         return SDL_APP_SUCCESS;
     }
+    
+    // Re-render on any key press
+    if (event->type == SDL_EVENT_KEY_DOWN || event->type == SDL_EVENT_WINDOW_RESIZED) {
+        needsRender = true;
+    }
+
+    if (event->type == SDL_EVENT_WINDOW_RESIZED) {
+        syncStorageBuffer();
+    }
+    
     return SDL_APP_CONTINUE;
 }
 
@@ -311,6 +383,9 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
     }
     if (indexBuffer) {
         SDL_ReleaseGPUBuffer(device, indexBuffer);
+    }
+    if (storageBuffer) {
+        SDL_ReleaseGPUBuffer(device, storageBuffer);
     }
     if (graphicsPipeline) {
         SDL_ReleaseGPUGraphicsPipeline(device, graphicsPipeline);
