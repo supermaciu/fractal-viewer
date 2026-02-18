@@ -377,7 +377,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
     }
 
     if (event->type == SDL_EVENT_MOUSE_WHEEL) {
-        zoom += -event->wheel.y * zoom * pow(2, -event->wheel.y/2-0.5); // inaccuracies when fast scrolling, lagging
+        zoom *= pow(1.1, -event->wheel.y); // inaccuracies when fast scrolling, lagging
+        SDL_Log("%f", zoom);
         syncStorageBuffer(event);
         needsRender = true;
     }
