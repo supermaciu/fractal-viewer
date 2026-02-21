@@ -21,7 +21,15 @@ static Uint16 indices[] = {
     0, 2, 3   // Second triangle
 };
 
-static double zoom = 1;
+double zoom = 1;
+#define BASE_OFFSET 0.1
+double currentOffset = BASE_OFFSET;
+double offsetX = 0;
+double offsetY = 0;
+
+#define BUFFER_SIZE 5
+
+bool needsRender = true;
 
 SDL_Window* window;
 SDL_GPUDevice* device;
@@ -29,31 +37,24 @@ SDL_GPUBuffer* vertexBuffer;
 SDL_GPUBuffer* indexBuffer;
 SDL_GPUBuffer* storageBuffer;
 SDL_GPUGraphicsPipeline* graphicsPipeline;
-bool needsRender = true;
 
 #define WINDOW_WIDTH 960
 #define WINDOW_HEIGHT 540
 
-void syncStorageBuffer(SDL_Event *event) {
-    // Upload resolution data
+void syncStorageBuffer() {
     SDL_GPUTransferBufferCreateInfo storageTransferInfo = {0};
     storageTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    storageTransferInfo.size = 5 * sizeof(double);
+    storageTransferInfo.size = BUFFER_SIZE * sizeof(double);
     
     SDL_GPUTransferBuffer* storageTransferBuffer = SDL_CreateGPUTransferBuffer(device, &storageTransferInfo);
     
-    int width, height, mouseX = 0, mouseY = 0;
+    int width, height;
     SDL_GetWindowSizeInPixels(window, &width, &height);
-    
-    if (event) {
-        mouseX = event->wheel.mouse_x;
-        mouseY = event->wheel.mouse_y;
-    }
 
-    double buffer[5] = {(double)width, (double)height, zoom, (double)mouseX, (double)mouseY};
+    double buffer[BUFFER_SIZE] = {(double)width, (double)height, offsetX, offsetY, zoom};
 
     void* storageMap = SDL_MapGPUTransferBuffer(device, storageTransferBuffer, false);
-    SDL_memcpy(storageMap, buffer, 5 * sizeof(double));
+    SDL_memcpy(storageMap, buffer, BUFFER_SIZE * sizeof(double));
     SDL_UnmapGPUTransferBuffer(device, storageTransferBuffer);
     
     // Upload storage buffer data to GPU
@@ -67,7 +68,7 @@ void syncStorageBuffer(SDL_Event *event) {
     SDL_GPUBufferRegion storageDst = {0};
     storageDst.buffer = storageBuffer;
     storageDst.offset = 0;
-    storageDst.size = 5 * sizeof(double);
+    storageDst.size = BUFFER_SIZE * sizeof(double);
     
     SDL_UploadToGPUBuffer(storageCopyPass, &storageSrc, &storageDst, false);
     SDL_EndGPUCopyPass(storageCopyPass);
@@ -285,7 +286,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     // Create storage buffer for window resolution
     SDL_GPUBufferCreateInfo storageBufferInfo = {0};
     storageBufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-    storageBufferInfo.size = 5 * sizeof(double);  // vec2: width, height; vec3: zoom, mouse_x, mouse_y
+    storageBufferInfo.size = BUFFER_SIZE * sizeof(double);
     
     storageBuffer = SDL_CreateGPUBuffer(device, &storageBufferInfo);
     if (!storageBuffer) {
@@ -293,8 +294,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         return SDL_APP_FAILURE;
     }
     
-    // // Upload resolution data
-    syncStorageBuffer(NULL);
+    syncStorageBuffer();
 
     return SDL_APP_CONTINUE;
 }
@@ -323,9 +323,9 @@ SDL_AppResult SDL_AppIterate(void *appstate)
         // Setup render target
         SDL_GPUColorTargetInfo colorTarget = {0};
         colorTarget.texture = swapchainTexture;
-        colorTarget.clear_color.r = 0.0f;
-        colorTarget.clear_color.g = 0.0f;
-        colorTarget.clear_color.b = 0.0f;
+        colorTarget.clear_color.r = 1.0f;
+        colorTarget.clear_color.g = 1.0f;
+        colorTarget.clear_color.b = 1.0f;
         colorTarget.clear_color.a = 1.0f;
         colorTarget.load_op = SDL_GPU_LOADOP_CLEAR;
         colorTarget.store_op = SDL_GPU_STOREOP_STORE;
@@ -372,19 +372,41 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
         return SDL_APP_SUCCESS;
     }
     
+    // movement by mouse
     if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == 1) {
 
     }
 
-    if (event->type == SDL_EVENT_MOUSE_WHEEL) {
-        zoom *= pow(1.1, -event->wheel.y); // inaccuracies when fast scrolling, lagging
-        SDL_Log("%f", zoom);
-        syncStorageBuffer(event);
+    // moving by arrows
+    if (event->type == SDL_EVENT_KEY_DOWN) {
+        if (event->key.key == SDLK_UP) {
+            offsetY += -currentOffset;
+        }
+        if (event->key.key == SDLK_DOWN) {
+            offsetY += currentOffset;
+        }
+        if (event->key.key == SDLK_RIGHT) {
+            offsetX += currentOffset;
+        }
+        if (event->key.key == SDLK_LEFT) {
+            offsetX += -currentOffset;
+        }
+
+        syncStorageBuffer();
         needsRender = true;
     }
 
+    // zoom
+    if (event->type == SDL_EVENT_MOUSE_WHEEL) {
+        zoom *= pow(1.1, -event->wheel.y);
+        currentOffset = BASE_OFFSET * zoom;
+        syncStorageBuffer();
+        needsRender = true;
+    }
+
+    // window resize
     if (event->type == SDL_EVENT_WINDOW_RESIZED) {
-        syncStorageBuffer(NULL);
+        syncStorageBuffer();
         needsRender = true;
     }
     
