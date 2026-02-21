@@ -26,6 +26,8 @@ double zoom = 1;
 double currentOffset = BASE_OFFSET;
 double offsetX = 0;
 double offsetY = 0;
+double prevMouseX = 0;
+double prevMouseY = 0;
 
 #define BUFFER_SIZE 5
 
@@ -373,8 +375,19 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
     }
     
     // movement by mouse
-    if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == 1) {
+    if (event->type == SDL_EVENT_MOUSE_MOTION && event->button.button == 1) {
+        double deltaX = event->motion.x - prevMouseX;
+        double deltaY = -(event->motion.y - prevMouseY);
 
+        offsetX -= deltaX * currentOffset * 0.01;
+        offsetY -= deltaY * currentOffset * 0.01;
+        
+        syncStorageBuffer();
+        needsRender = true;
+    }
+    if (event->type == SDL_EVENT_MOUSE_MOTION && !event->button.down) {
+        prevMouseX = event->motion.x;
+        prevMouseY = event->motion.y;
     }
 
     // moving by arrows

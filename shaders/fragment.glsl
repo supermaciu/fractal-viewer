@@ -11,6 +11,7 @@ layout (set = 2, binding = 0) readonly buffer StorageBuffer {
 void interpolate(in dvec2 pixel, out dvec2 point) {
     dvec2 zoom = dvec2(4*zoomAmount, 2*zoomAmount);
     point = pixel / resolution - 0.5;
+    point.y = -point.y; // for euclidean plane coordinates
     // point *= zoom;
     // point += offset;
     point = fma(point, zoom, offset);
