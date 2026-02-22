@@ -381,8 +381,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
         double deltaX = event->motion.x - prevMouseX;
         double deltaY = -(event->motion.y - prevMouseY);
 
-        offsetX -= deltaX/width * zoom;
-        offsetY -= deltaY/height * zoom;
+        offsetX -= 4 * deltaX/width * zoom;
+        offsetY -= 2 * deltaY/height * zoom;
         
         syncStorageBuffer();
         needsRender = true;
@@ -416,12 +416,14 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
         zoom *= pow(1.1, -event->wheel.y);
         currentOffset = BASE_OFFSET * zoom;
 
-        double mouseX = 4 * zoom * (prevMouseX / width - 0.5);
-        double mouseY = -2 * zoom * (prevMouseY / height - 0.5);
+        double mouseX = 2 * zoom * 2 * (prevMouseX / width - 0.5);
+        double mouseY = -zoom * 2 * (prevMouseY / height - 0.5);
         
         SDL_Log("%f %f", mouseX, mouseY);
 
         // offset
+        // offsetX += mouseX * zoom;
+        // offsetY += mouseY * zoom;
 
         syncStorageBuffer();
         needsRender = true;

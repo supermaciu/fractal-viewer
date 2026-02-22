@@ -12,11 +12,9 @@ layout (set = 2, binding = 0) readonly buffer StorageBuffer {
 };
 
 void interpolate(in dvec2 pixel, out dvec2 point) {
-    dvec2 zoom = dvec2(4*zoomAmount, 2*zoomAmount);
-    point = pixel / resolution - 0.5;
-    point.y = -point.y; // for euclidean plane coordinates
-    // point *= zoom;
-    // point += offset;
+    dvec2 zoom = dvec2(2*zoomAmount, -zoomAmount); // for euclidean plane coordinates and nice representation
+    point = 2 * (pixel / resolution - 0.5); // normalized coordinates (-1; 1)
+    // point *= zoom; point += offset; (fused multiplication addition)
     point = fma(point, zoom, offset);
 }
 
