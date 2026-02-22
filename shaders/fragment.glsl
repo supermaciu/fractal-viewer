@@ -1,7 +1,7 @@
 #version 450
 
-#define dvec2 vec2
-#define double float
+// #define dvec2 vec2
+// #define double float
 
 layout (location = 0) out vec4 FragColor;
 
@@ -23,27 +23,30 @@ vec3 pal(in float t) {
     return a + b*cos(6.28318*(c*t+d));
 }
 
-int max_iter = 1000;
 void mandelbrot(in dvec2 c, out vec4 color) {
-    double fb = 0;
-    double fa = 0;
-    double tempa;
-    double tempb;
+    int max_iter = int(500.0 + 150.0 * log2(1.0 / float(zoomAmount)));
+
+    double fa = 0.0;
+    double fb = 0.0;
 
     int i;
-    double d;
+    double d = 0.0;
     for (i = 0; i < max_iter; i++) {
-        d = distance(dvec2(0, 0), dvec2(fa, fb));
-        if (d > 2) break;
+        double fa2 = fa * fa;
+        double fb2 = fb * fb;
+        d = fa2 + fb2;
+        if (d > 4.0) break;
 
-        tempa = fa*fa - fb*fb + c.x;
-        tempb = 2.0*fa*fb + c.y;
-        fa = tempa;
-        fb = tempb;
+        fb = 2.0 * fa * fb + c.y;
+        fa = fa2 - fb2 + c.x;
     }
 
-    double x = 5.0*log(i+1)/i;
-    color = vec4(vec3(x), 1.0);
+    if (i >= max_iter) {
+        color = vec4(0.0, 0.0, 0.0, 1.0);
+    } else {
+        float x = log(float(i) + 1.0) / log(float(max_iter) + 1.0);
+        color = vec4(vec3(1-x), 1.0);
+    }
 }
 
 void main() {

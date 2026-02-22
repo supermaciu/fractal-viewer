@@ -21,7 +21,7 @@ static Uint16 indices[] = {
     0, 2, 3   // Second triangle
 };
 
-#define double float
+// #define double float
 
 double zoom = 1;
 #define BASE_OFFSET 0.1
