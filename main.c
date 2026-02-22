@@ -32,6 +32,8 @@ double prevMouseX = 0;
 double prevMouseY = 0;
 int width, height;
 
+#define ZOOM_SENSIVITY 1.1
+
 #define BUFFER_SIZE 5
 
 bool needsRender = true;
@@ -379,10 +381,11 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
     // movement by mouse
     if (event->type == SDL_EVENT_MOUSE_MOTION && event->button.button == 1) {
         double deltaX = event->motion.x - prevMouseX;
-        double deltaY = -(event->motion.y - prevMouseY);
+        double deltaY = event->motion.y - prevMouseY;
 
+        // normalized relative coordinates
         offsetX -= 4 * deltaX/width * zoom;
-        offsetY -= 2 * deltaY/height * zoom;
+        offsetY -= -2 * deltaY/height * zoom;
         
         syncStorageBuffer();
         needsRender = true;
@@ -413,17 +416,17 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 
     // zoom
     if (event->type == SDL_EVENT_MOUSE_WHEEL) {
-        zoom *= pow(1.1, -event->wheel.y);
+        double prevZoom = zoom;
+        
+        zoom *= pow(ZOOM_SENSIVITY, -event->wheel.y);
         currentOffset = BASE_OFFSET * zoom;
 
-        double mouseX = 2 * zoom * 2 * (prevMouseX / width - 0.5);
-        double mouseY = -zoom * 2 * (prevMouseY / height - 0.5);
-        
-        SDL_Log("%f %f", mouseX, mouseY);
+        double deltaZoom = zoom - prevZoom;
+        double nx = 4.0 * (prevMouseX / width - 0.5);
+        double ny = -2.0 * (prevMouseY / height - 0.5);
 
-        // offset
-        // offsetX += mouseX * zoom;
-        // offsetY += mouseY * zoom;
+        offsetX -= nx * deltaZoom;
+        offsetY -= ny * deltaZoom;
 
         syncStorageBuffer();
         needsRender = true;
