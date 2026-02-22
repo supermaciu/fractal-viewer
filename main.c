@@ -21,6 +21,8 @@ static Uint16 indices[] = {
     0, 2, 3   // Second triangle
 };
 
+#define double float
+
 double zoom = 1;
 #define BASE_OFFSET 0.1
 double currentOffset = BASE_OFFSET;
@@ -28,6 +30,7 @@ double offsetX = 0;
 double offsetY = 0;
 double prevMouseX = 0;
 double prevMouseY = 0;
+int width, height;
 
 #define BUFFER_SIZE 5
 
@@ -40,8 +43,8 @@ SDL_GPUBuffer* indexBuffer;
 SDL_GPUBuffer* storageBuffer;
 SDL_GPUGraphicsPipeline* graphicsPipeline;
 
-#define WINDOW_WIDTH 960
-#define WINDOW_HEIGHT 540
+#define DEFAULT_WINDOW_WIDTH 960
+#define DEFAULT_WINDOW_HEIGHT 540
 
 void syncStorageBuffer() {
     SDL_GPUTransferBufferCreateInfo storageTransferInfo = {0};
@@ -49,9 +52,6 @@ void syncStorageBuffer() {
     storageTransferInfo.size = BUFFER_SIZE * sizeof(double);
     
     SDL_GPUTransferBuffer* storageTransferBuffer = SDL_CreateGPUTransferBuffer(device, &storageTransferInfo);
-    
-    int width, height;
-    SDL_GetWindowSizeInPixels(window, &width, &height);
 
     double buffer[BUFFER_SIZE] = {(double)width, (double)height, offsetX, offsetY, zoom};
 
@@ -82,11 +82,13 @@ void syncStorageBuffer() {
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 {
     // Create a window
-    window = SDL_CreateWindow("Fractal Viewer", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    window = SDL_CreateWindow("Fractal Viewer", DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window) {
         SDL_Log("Failed to create window: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
+
+    SDL_GetWindowSizeInPixels(window, &width, &height);
     
     // Create the GPU device - prefer SPIRV for cross-platform, fallback to others
     device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, NULL);
@@ -379,8 +381,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
         double deltaX = event->motion.x - prevMouseX;
         double deltaY = -(event->motion.y - prevMouseY);
 
-        offsetX -= deltaX * currentOffset * 0.01;
-        offsetY -= deltaY * currentOffset * 0.01;
+        offsetX -= deltaX/width * zoom;
+        offsetY -= deltaY/height * zoom;
         
         syncStorageBuffer();
         needsRender = true;
@@ -413,12 +415,21 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
     if (event->type == SDL_EVENT_MOUSE_WHEEL) {
         zoom *= pow(1.1, -event->wheel.y);
         currentOffset = BASE_OFFSET * zoom;
+
+        double mouseX = 4 * zoom * (prevMouseX / width - 0.5);
+        double mouseY = -2 * zoom * (prevMouseY / height - 0.5);
+        
+        SDL_Log("%f %f", mouseX, mouseY);
+
+        // offset
+
         syncStorageBuffer();
         needsRender = true;
     }
 
     // window resize
     if (event->type == SDL_EVENT_WINDOW_RESIZED) {
+        SDL_GetWindowSizeInPixels(window, &width, &height);
         syncStorageBuffer();
         needsRender = true;
     }

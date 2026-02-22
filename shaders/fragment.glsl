@@ -1,5 +1,8 @@
 #version 450
 
+#define dvec2 vec2
+#define double float
+
 layout (location = 0) out vec4 FragColor;
 
 layout (set = 2, binding = 0) readonly buffer StorageBuffer {
